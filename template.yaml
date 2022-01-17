@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  todo
+
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Environment:
+      Variables:
+        TABLE_NAME: !Select [1, !Split ["/", !GetAtt TodoTable.Arn]]
+
+Parameters:
+  TodoTableNameParameter:
+    Type: String
+    Default: todo-list
+    Description: Name of Todo DynamoDB Table
+  CognitoUserPoolDomainParameter:
+    Type: String
+    Default: todo-list-user-pool
+    Description: Name of Cognito User Pool Domain
+
+Resources:
+  # ApiGateway
+  TodoApi:
+    Type: AWS::Serverless:Api
+    Properties:
+      StageName: Prod
+      Cors: "'*'"
+      Auth:
+        DefaultAuthorizer: MyCognitoAuthorizer
+        Authorizers:
+          MyCognitoAuthorizer:
+            UserPoolArn: !GetAtt MyCognitoUserPool.Arn
+
+  # Lambda Function
+  TodoServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-all-todo-items.getAllTodoItems
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A Lambda function that returns all todo items.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TodoTable
+      Events:
+        TodoList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /todo
+            Method: get
+            Auth:
+              Authorizer: MyCognitoAuthorizer
+              AuthorizationScopes:
+                - todo-api/read-todo
+
+  # DynamoDB
+  TodoTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TableName:
+        Ref: TodoTableNameParameter
+
+  # Cognito User Pool
+  MyCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: TodoUserPool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      UsernameAttributes:
+        - email
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: false
+
+  MyCognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref MyCognitoUserPool
+      ClientName: TodoUserPoolClient
+      GenerateSecret: false
+      CallbackURLs:
+        - https://example.com/callback
+        - http://localhost/callback
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+        - todo-api/create_todo
+        - todo-api/read_todo
+        - todo-api/update_todo
+        - todo-api/delete_todo
+      SupportedIdentityProviders:
+        - COGNITO
+
+  MyCognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref MyCognitoUserPool
+      Domain:
+        Ref: CognitoUserPoolDomainParameter
+
+  MyCognitoUserPoolResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref MyCognitoUserPool
+      Identifier: todo-api
+      Name: Todo API
+      Scopes:
+        - ScopeName: "read_todo"
+          ScopeDescription: "Read Todo List"
+        - ScopeName: "create_todo"
+          ScopeDescription: "Create Todo"
+        - ScopeName: "update_todo"
+          ScopeDescription: "Update Todo"
+        - ScopeName: "delete_todo"
+          ScopeDescription: "Delete Todo"
+
+Outputs:
+  TodoServiceApi:
+    Description: API Gateway endpoint URL for Prod stage for TodoService function
+    Value: !Sub https://${TodoApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/todo/
+  TodoServiceFunction:
+    Description: TodoService Lambda Function ARN
+    Value: !GetAtt TodoServiceFunction.Arn
+  TodoServiceFunctionIamRole:
+    Description: Implicit IAM Role created for Hello World function
+    Value: !GetAtt TodoServiceFunctionRole.Arn
+  TodoTableArn:
+    Description: DynamoDB Arn
+    Value: !GetAtt TodoTable.Arn
+  MyCognitoUserPoolURL:
+    Description: MyCognitoUserPool URL
+    Value: !Sub https://${CognitoUserPoolDomainParameter}.auth.${AWS::Region}.amazoncognito.com
+  MyCognitoUserPoolClientID:
+    Description: MyCognitoUserPoolClient client_id
+    Value: !Ref MyCognitoUserPoolClient

@@ -1,0 +1,7 @@
+node_modules
+
+get-token.sh
+
+samconfig.toml
+.aws-sam
+
